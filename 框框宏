@@ -1,0 +1,27 @@
+Sub InsertRectangleInCM()
+    Dim ws As Worksheet
+    Dim shp As Shape
+    Dim widthCM As Double, heightCM As Double
+    Dim leftPos As Double, topPos As Double
+
+    ' 定义当前工作表
+    Set ws = ActiveSheet
+
+    ' 设置宽度和高度（以厘米为单位）
+    widthCM = 6.5    ' 宽 6.5 厘米
+    heightCM = 2.5   ' 高 2.5 厘米
+
+    ' 获取当前单元格位置
+    leftPos = ActiveCell.Left
+    topPos = ActiveCell.Top
+
+    ' 插入形状，单位转换：1 厘米 ≈ 28.35 点
+    Set shp = ws.Shapes.AddShape(msoShapeRectangle, leftPos, topPos, widthCM * 28.35, heightCM * 28.35)
+
+    ' 设置图形样式
+    With shp
+        .Line.Weight = 3             ' 边框粗细为 3pt
+        .Line.ForeColor.RGB = RGB(255, 0, 0) ' 边框颜色为红色
+        .Fill.Visible = msoFalse     ' 去除填充颜色
+    End With
+End Sub
