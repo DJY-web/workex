@@ -1,0 +1,34 @@
+Sub ResizeAndArrangeImagesVertically()
+    Dim shp As Shape
+    Dim ws As Worksheet
+    Dim imgWidth As Single, imgHeight As Single
+    Dim topPos As Single
+    Dim margin As Single
+    
+    ' Set parameters
+    Set ws = ActiveSheet
+    imgWidth = 1700 ' Image width (in points), adjust as needed
+    imgHeight = 500 ' Image height (in points), adjust as needed
+    margin = 10 ' Margin between images (in points), adjust as needed
+    
+    topPos = margin ' Initial top position
+    
+    ' Iterate through all shapes in the worksheet
+    For Each shp In ws.Shapes
+        If shp.Type = msoPicture Then
+            ' Set image size
+            shp.LockAspectRatio = msoFalse
+            shp.Width = imgWidth
+            shp.Height = imgHeight
+            
+            ' Set image position
+            shp.Left = margin ' Image left position, adjust as needed
+            shp.Top = topPos
+            
+            ' Update the top position for the next image
+            topPos = topPos + imgHeight + margin
+        End If
+    Next shp
+    
+End Sub
+
