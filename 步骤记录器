@@ -1,0 +1,238 @@
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# Create the Form
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "ZIP to Images Extractor"
+$form.Size = New-Object System.Drawing.Size(500,300)
+$form.StartPosition = "CenterScreen"
+
+# Label for Drag-and-Drop
+$label = New-Object System.Windows.Forms.Label
+$label.Text = "Drag and drop your ZIP file here"
+$label.AutoSize = $false
+$label.TextAlign = "MiddleCenter"
+$label.Dock = "Top"
+$label.Height = 50
+$label.Font = New-Object System.Drawing.Font("Arial", 12, [System.Drawing.FontStyle]::Bold)
+$form.Controls.Add($label)
+
+# TextBox to display file path
+$textBox = New-Object System.Windows.Forms.TextBox
+$textBox.Multiline = $false
+$textBox.ReadOnly = $true
+$textBox.Dock = "Top"
+$textBox.Height = 30
+$form.Controls.Add($textBox)
+
+# Extract Button
+$button = New-Object System.Windows.Forms.Button
+$button.Text = "Extract Images"
+$button.Dock = "Top"
+$button.Height = 40
+$button.Enabled = $false
+$form.Controls.Add($button)
+
+# Function to Sanitize Filenames
+function Sanitize-FileName($fileName) {
+    return ($fileName -replace '[\\/:*?"<>|]', '_').Trim()
+}
+
+# Function to Decode Base64 String
+function Decode-Base64String($base64String) {
+    return [System.Convert]::FromBase64String($base64String)
+}
+
+# Handle Drag-and-Drop
+$form.AllowDrop = $true
+$form.Add_DragEnter({
+    if ($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) {
+        $_.Effect = [Windows.Forms.DragDropEffects]::Copy
+    }
+    else {
+        $_.Effect = [Windows.Forms.DragDropEffects]::None
+    }
+})
+
+$form.Add_DragDrop({
+    $files = $_.Data.GetData("FileDrop")
+    if ($files.Length -gt 0) {
+        $file = $files[0]
+        if ($file -match "\.zip$") {
+            $textBox.Text = $file
+            $button.Enabled = $true
+        }
+        else {
+            [System.Windows.Forms.MessageBox]::Show("Please drop a valid ZIP file.", "Invalid File", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        }
+    }
+})
+
+# Extract Button Click Event
+$button.Add_Click({
+    $zipFilePath = $textBox.Text
+    if (-Not (Test-Path -Path $zipFilePath)) {
+        [System.Windows.Forms.MessageBox]::Show("The specified ZIP file does not exist.", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        return
+    }
+
+    # Get current time in HHmm format
+    $currentTime = Get-Date -Format "HHmm"
+
+    # Get the ZIP file name without extension
+    $zipFileName = [System.IO.Path]::GetFileNameWithoutExtension($zipFilePath)
+
+    # Define parent directory of the ZIP file
+    $parentDir = Split-Path -Path $zipFilePath
+
+    # Define extraction directory name as HHmm_ZipFileName_Extracted
+    $extractDirName = "${currentTime}_${zipFileName}_Extracted"
+    $extractPath = Join-Path -Path $parentDir -ChildPath $extractDirName
+
+    # Create extraction directory if it doesn't exist
+    if (-Not (Test-Path -Path $extractPath)) {
+        try {
+            New-Item -ItemType Directory -Path $extractPath | Out-Null
+        }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show("Failed to create extraction directory: $extractPath", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            return
+        }
+    }
+
+    # Extract the ZIP file
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipFilePath, $extractPath)
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show("An error occurred while extracting the ZIP file: $_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        return
+    }
+
+    # Find all .mht files in the extracted directory
+    $mhtFiles = Get-ChildItem -Path $extractPath -Recurse -Filter *.mht
+
+    if ($mhtFiles.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("No .mht files found in the ZIP archive.", "Info", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        return
+    }
+
+    foreach ($mhtFile in $mhtFiles) {
+        try {
+            $content = Get-Content -Path $mhtFile.FullName -Raw
+        }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show("Failed to read file: $($mhtFile.FullName)", "Warning", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+            continue
+        }
+
+        # Extract boundary string from headers
+        if ($content -match 'boundary="?([^";]+)"?') {
+            $boundary = $matches[1]
+        }
+        else {
+            $boundary = "----=_NextPart_FALLBACK_BOUNDARY"
+        }
+
+        # Split content into MIME parts based on boundary
+        $parts = $content -split ("--" + [Regex]::Escape($boundary))
+
+        foreach ($part in $parts) {
+            if ([string]::IsNullOrWhiteSpace($part)) {
+                continue
+            }
+
+            $part = $part.Trim()
+            $headers = @{}
+            $data = ""
+
+            $lines = $part -split "`r?`n"
+            $isHeader = $true
+
+            foreach ($line in $lines) {
+                if ($isHeader) {
+                    if ([string]::IsNullOrWhiteSpace($line)) {
+                        $isHeader = $false
+                        continue
+                    }
+                    if ($line -match '^(?<key>[^:]+):\s*(?<value>.+)$') {
+                        $key = $matches['key'].Trim().ToLower()
+                        $value = $matches['value'].Trim()
+                        $headers[$key] = $value
+                    }
+                }
+                else {
+                    $data += $line
+                }
+            }
+
+            # Check if the part is an image with base64 encoding
+            if ($headers.ContainsKey("content-type") -and $headers["content-type"].StartsWith("image/") `
+                -and $headers.ContainsKey("content-transfer-encoding") `
+                -and $headers["content-transfer-encoding"].ToLower() -eq "base64") {
+
+                # Determine file extension based on Content-Type
+                switch ($headers["content-type"]) {
+                    "image/jpeg" { $ext = ".jpg" }
+                    "image/pjpeg" { $ext = ".jpg" }
+                    "image/png"  { $ext = ".png" }
+                    "image/gif"  { $ext = ".gif" }
+                    "image/bmp"  { $ext = ".bmp" }
+                    "image/tiff" { $ext = ".tiff" }
+                    "image/wmf"  { $ext = ".wmf" }
+                    "image/x-wmf"{ $ext = ".wmf" }
+                    "image/emf"  { $ext = ".emf" }
+                    "image/x-emf"{ $ext = ".emf" }
+                    default       { $ext = ".bin" }
+                }
+
+                # Extract filename from Content-Location or Content-Disposition
+                if ($headers.ContainsKey("content-location")) {
+                    $fileName = [System.IO.Path]::GetFileName($headers["content-location"])
+                }
+                elseif ($headers.ContainsKey("content-disposition") -and $headers["content-disposition"] -match 'filename="?([^";]+)"?') {
+                    $fileName = $matches[1]
+                }
+                else {
+                    # Generate a unique filename if none is provided
+                    $fileName = "extracted_$([Guid]::NewGuid().ToString())$ext"
+                }
+
+                # Sanitize the filename
+                $fileName = Sanitize-FileName $fileName
+
+                # Clean the Base64 data by removing all whitespace
+                $base64Data = $data -replace "\s", ""
+
+                # Decode the Base64 data
+                try {
+                    $bytes = Decode-Base64String $base64Data
+                }
+                catch {
+                    [System.Windows.Forms.MessageBox]::Show("Failed to decode image data for '$fileName'.", "Warning", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+                    continue
+                }
+
+                # Define the output path for the image (same directory as the .mht file)
+                $mhtDir = Split-Path -Path $mhtFile.FullName
+                $outputPath = Join-Path -Path $mhtDir -ChildPath $fileName
+
+                # Save the decoded bytes as an image file
+                try {
+                    [System.IO.File]::WriteAllBytes($outputPath, $bytes)
+                }
+                catch {
+                    [System.Windows.Forms.MessageBox]::Show("Failed to save image '$fileName'.", "Warning", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+                    continue
+                }
+            }
+        }
+    }
+
+    [System.Windows.Forms.MessageBox]::Show("Image extraction completed.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+})
+
+# Show the Form
+$form.Add_Shown({$form.Activate()})
+[void] $form.ShowDialog()
