@@ -1,27 +1,61 @@
-Sub InsertRectangleInCM()
+Option Explicit
+
+Public InAnnotationMode As Boolean ' Global variable to track annotation mode status
+
+' Macro: Toggle annotation mode
+Public Sub ToggleAnnotationMode()
+    InAnnotationMode = Not InAnnotationMode
+    
+    If InAnnotationMode Then
+        MsgBox "Annotation mode is now active. Double-click on a cell or image to add a rectangle.", vbInformation
+    Else
+        MsgBox "Annotation mode is now inactive.", vbInformation
+    End If
+End Sub
+
+' Main logic: Handle annotation insertion
+Public Sub HandleAnnotation(ByVal Sh As Worksheet, ByVal Target As Range)
     Dim ws As Worksheet
     Dim shp As Shape
     Dim widthCM As Double, heightCM As Double
     Dim leftPos As Double, topPos As Double
-
-    ' 定义当前工作表
-    Set ws = ActiveSheet
-
-    ' 设置宽度和高度（以厘米为单位）
-    widthCM = 6.5    ' 宽 6.5 厘米
-    heightCM = 2.5   ' 高 2.5 厘米
-
-    ' 获取当前单元格位置
-    leftPos = ActiveCell.Left
-    topPos = ActiveCell.Top
-
-    ' 插入形状，单位转换：1 厘米 ≈ 28.35 点
+    
+    ' Set the worksheet
+    Set ws = Sh
+    
+    ' Define rectangle dimensions (in cm)
+    widthCM = 6.5 ' Width
+    heightCM = 2.5 ' Height
+    
+    ' Determine the position based on the clicked object
+    If TypeName(Application.Selection) = "Range" Then
+        ' User double-clicked on a cell
+        leftPos = Target.Left
+        topPos = Target.Top
+    ElseIf TypeName(Application.Selection) = "ShapeRange" Then
+        ' User double-clicked on a shape (e.g., an image)
+        Dim clickedShape As Shape
+        Set clickedShape = Application.Selection.ShapeRange(1)
+        ' Place the rectangle at the center of the shape
+        leftPos = clickedShape.Left + (clickedShape.Width / 2) - ((widthCM * 28.35) / 2)
+        topPos = clickedShape.Top + (clickedShape.Height / 2) - ((heightCM * 28.35) / 2)
+    Else
+        ' If neither a cell nor a shape was clicked, exit
+        Exit Sub
+    End If
+    
+    ' Insert the rectangle
     Set shp = ws.Shapes.AddShape(msoShapeRectangle, leftPos, topPos, widthCM * 28.35, heightCM * 28.35)
-
-    ' 设置图形样式
+    
+    ' Format the rectangle
     With shp
-        .Line.Weight = 3             ' 边框粗细为 3pt
-        .Line.ForeColor.RGB = RGB(255, 0, 0) ' 边框颜色为红色
-        .Fill.Visible = msoFalse     ' 去除填充颜色
+        .Line.Weight = 3                          ' Border thickness
+        .Line.ForeColor.RGB = RGB(255, 0, 0)      ' Border color (red)
+        .Fill.Visible = msoFalse                  ' No fill color
+        .ZOrder msoBringToFront                   ' Bring to front
+        .Name = "Annotation_" & Format(Now, "hhmmss") ' Unique name using a timestamp
     End With
+    
+    ' Select the inserted rectangle
+    shp.Select
 End Sub
