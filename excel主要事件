@@ -1,0 +1,12 @@
+Option Explicit
+
+Private Sub Workbook_SheetBeforeDoubleClick(ByVal Sh As Object, ByVal Target As Range, Cancel As Boolean)
+    ' Check if annotation mode is active
+    If Not InAnnotationMode Then Exit Sub
+
+    ' Cancel the default double-click behavior
+    Cancel = True
+
+    ' Call the main annotation handler in the standard module
+    Call HandleAnnotation(Sh, Target)
+End Sub
